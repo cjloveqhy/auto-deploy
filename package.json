@@ -1,0 +1,45 @@
+{
+  "name": "@happyc/auto-deploy",
+  "version": "0.0.1",
+  "description": "A tool dedicated to build, upload and deploy",
+  "primary": true,
+  "type": "module",
+  "packageManager": "pnpm@9.1.1",
+  "engines": {
+    "node": "^18.12 || >=20.9",
+    "pnpm": ">=9.0.0"
+  },
+  "author": {
+    "name": "cjloveqhy",
+    "email": "15557422216@139.com"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "auto-deploy": "dist/cli.js"
+  },
+  "files": [
+    "*.d.ts",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "c12": "^1.11.2",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "consola": "^3.2.3",
+    "defu": "^6.1.4",
+    "ssh2": "^1.16.0",
+    "tsup": "^8.4.0"
+  }
+}
