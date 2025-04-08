@@ -8,7 +8,7 @@ import {
   uploadDirectory
 } from "./utils";
 import defu from "defu";
-import * as consola from 'consola';
+import { consola } from 'consola';
 import { Client } from 'ssh2';
 import chalk from "chalk";
 import * as path from "path";
