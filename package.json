@@ -4,6 +4,11 @@
   "description": "A tool dedicated to build, upload and deploy",
   "primary": true,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cjloveqhy/auto-deploy.git"
+  },
   "packageManager": "pnpm@9.1.1",
   "engines": {
     "node": "^18.12 || >=20.9",
@@ -31,7 +36,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup",
+    "publish": "pnpm publish --access public"
   },
   "dependencies": {
     "c12": "^1.11.2",
@@ -41,5 +47,10 @@
     "defu": "^6.1.4",
     "ssh2": "^1.16.0",
     "tsup": "^8.4.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.16",
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.3"
   }
 }

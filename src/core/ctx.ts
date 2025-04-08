@@ -1,14 +1,20 @@
 import {Context, Options} from "../index";
-import {loadConfig} from "c12";
-import {getBuildOutDir, getPackageManager, localExecCommands, remoteExecCommands, uploadDirectory} from "./utils";
+import {
+  getBuildOutDir,
+  getConfig,
+  getPackageManager,
+  localExecCommands,
+  remoteExecCommands,
+  uploadDirectory
+} from "./utils";
 import defu from "defu";
-import consola from 'consola';
-import { Client } from 'ssh2'
+import * as consola from 'consola';
+import { Client } from 'ssh2';
 import chalk from "chalk";
-import path from "path";
+import * as path from "path";
 
 export async function createContext(rawOptions?: Options): Promise<Context> {
-  const { config } = await loadConfig<Options>({ name: 'ssh' });
+  const { config } = await getConfig<Options>();
   const outDir = getBuildOutDir(rawOptions.uploadPath || config.uploadPath || 'dist');
   const defaultOption: Options = {
     username: 'root',

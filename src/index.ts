@@ -1,3 +1,5 @@
+export * from './core/ctx';
+
 export type Commands = {
   /**
    * 文件上传前执行脚本

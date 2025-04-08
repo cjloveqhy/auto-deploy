@@ -6,14 +6,7 @@ export default defineConfig({
     'index': 'src/index.ts',
     'cli': 'src/cli.ts',
   },
-  dts: {
-    compilerOptions: {
-      moduleResolution: 'node',
-      resolveJsonModule: true,
-      esModuleInterop: true,
-    }
-  },
-  external: [...Object.keys(packageJson.dependencies)],
+  external: Object.keys(packageJson.dependencies),
   format: ['cjs', 'esm'],
   cjsInterop: true,
   splitting: true,
@@ -22,4 +15,17 @@ export default defineConfig({
   clean: true,
   target: 'es2020',
   sourcemap: false,
+  dts: {
+    compilerOptions: {
+      target: 'esnext',
+      module: 'esnext',
+      moduleResolution: 'node',
+      resolveJsonModule: true,
+      esModuleInterop: true,
+      lib: [
+        'dom',
+        'esnext'
+      ],
+    }
+  },
 })

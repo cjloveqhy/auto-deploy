@@ -1,8 +1,18 @@
-import path from "path";
+import * as path from "path";
 import * as fs from "node:fs";
-import consola from "consola";
+import * as consola from "consola";
 import chalk from "chalk";
 import {spawn} from "child_process";
+import {ConfigLayerMeta, loadConfig, ResolvedConfig, UserInputConfig} from "c12";
+
+export async function getConfig<T extends UserInputConfig = UserInputConfig, MT extends ConfigLayerMeta = ConfigLayerMeta>(): Promise<ResolvedConfig<T, MT>> {
+  const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: 'ssh' });
+  if (!config || Object.keys(config).length === 0) {
+    consola.error(`Configure in the project root path:\n${chalk.blue('ssh.config.ts')}\n${chalk.blue('ssh.config.js')}\n${chalk.blue('ssh.config.json')}\n${chalk.blue('ssh.config.mjs')}\n${chalk.blue('ssh.config.cjs')}`);
+    return;
+  }
+  return { config, ...resolvedConfig };
+}
 
 export function slash(str) {
   return str.replace(/\\/g, "/");
@@ -39,7 +49,7 @@ export async function uploadDirectory(conn, localDir, remoteDir) {
 
   for (const item of items) {
     const localPath = path.join(localDir, item);
-    const remotePath = path.join(remoteDir, item).replaceAll('\\', '/');
+    const remotePath = path.join(remoteDir, item).replace(/\\/g, '/');
     const stats = fs.statSync(localPath);
 
     if (stats.isDirectory()) {
@@ -52,7 +62,7 @@ export async function uploadDirectory(conn, localDir, remoteDir) {
   }
 }
 
-export async function uploadFile(sftp, localPath, remotePath) {
+export async function uploadFile(sftp, localPath, remotePath): Promise<void> {
   return new Promise((resolve, reject) => {
     const readStream = fs.createReadStream(localPath);
     const writeStream = sftp.createWriteStream(remotePath);
@@ -65,7 +75,7 @@ export async function uploadFile(sftp, localPath, remotePath) {
 
     readStream.on('data', (chunk) => {
       uploadedBytes += chunk.length;
-      progress = ((uploadedBytes / totalBytes) * 100).toFixed(2);
+      progress = Number(((uploadedBytes / totalBytes) * 100).toFixed(2));
       const pathPrefix = path.resolve(process.cwd());
       const shortPath = localPath.replace(pathPrefix + path.sep, '').replaceAll('\\', path.sep) as string;
       if (progress < 100) {
@@ -89,7 +99,7 @@ export async function uploadFile(sftp, localPath, remotePath) {
   });
 }
 
-export async function ensureRemoteDir(sftp, remoteDir) {
+export async function ensureRemoteDir(sftp, remoteDir): Promise<void> {
   return new Promise((resolve, reject) => {
     sftp.stat(remoteDir, (err) => {
       if (err && err.code === 2) {
@@ -106,7 +116,7 @@ export async function ensureRemoteDir(sftp, remoteDir) {
   });
 }
 
-async function execWithLiveOutput(cmd) {
+async function execWithLiveOutput(cmd): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, {
       stdio: 'inherit',
