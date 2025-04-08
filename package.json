@@ -1,6 +1,6 @@
 {
   "name": "@happyc/auto-deploy",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A tool dedicated to build, upload and deploy",
   "homepage": "https://github.com/cjloveqhy/auto-deploy#readme",
   "type": "module",
