@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "publish": "bumpp package.json && pnpm publish --access public"
+    "publish": "bumpp package.json --commit --push --no-tag && pnpm publish --access public"
   },
   "dependencies": {
     "c12": "^1.11.2",
