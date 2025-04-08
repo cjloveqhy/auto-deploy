@@ -1,6 +1,6 @@
 {
   "name": "@happyc/auto-deploy",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A tool dedicated to build, upload and deploy",
   "homepage": "https://github.com/cjloveqhy/auto-deploy#readme",
   "type": "module",
@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "publish": "pnpm publish --access public"
+    "publish": "bumpp package.json"
   },
   "dependencies": {
     "c12": "^1.11.2",
@@ -57,6 +57,7 @@
   "devDependencies": {
     "@types/lodash": "^4.17.16",
     "@types/node": "^22.14.0",
+    "bumpp": "^10.1.0",
     "typescript": "^5.8.3"
   }
 }
