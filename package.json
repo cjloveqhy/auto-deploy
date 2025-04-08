@@ -3,8 +3,15 @@
   "version": "0.0.1",
   "description": "A tool dedicated to build, upload and deploy",
   "primary": true,
+  "homepage": "https://github.com/cjloveqhy/auto-deploy#readme",
   "type": "module",
   "license": "MIT",
+  "keywords": [
+    "typescript",
+    "build",
+    "remote upload",
+    "deploy"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cjloveqhy/auto-deploy.git"
