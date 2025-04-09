@@ -80,7 +80,7 @@ export async function uploadFile(sftp, localPath, remotePath): Promise<void> {
       const shortPath = localPath.replace(pathPrefix + path.sep, '').replaceAll('\\', path.sep) as string;
       if (progress < 100) {
         if (!loading) {
-          loading = createLoading((active) => chalk.blue(`\r${active} uploading ${shortPath} >> ${remotePath}: ${progress}%`))
+          loading = createLoading((active) => chalk.blue(`\r${active} uploading ${shortPath}  ${progress}%`))
           loading.start();
         }
       } else {
