@@ -85,7 +85,7 @@ export async function uploadFile(sftp, localPath, remotePath): Promise<void> {
         }
       } else {
         loading && loading.stop();
-        consola.success(`\r${chalk.blue(shortPath)}`);
+        consola.log(`\x1B[2K\r${chalk.green('√')} ${chalk.blue(shortPath)}`);
       }
     });
 
