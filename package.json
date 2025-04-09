@@ -44,7 +44,7 @@
   "scripts": {
     "build": "tsup",
     "pubnpm": "pnpm build && pnpm publish --access public",
-    "release": "bumpp package.json --commit --push --no-tag"
+    "up version": "bumpp package.json --commit --push --no-tag"
   },
   "dependencies": {
     "c12": "^1.11.2",
