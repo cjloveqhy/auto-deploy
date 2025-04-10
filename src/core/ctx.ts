@@ -27,11 +27,21 @@ export async function createContext(rawOptions?: Options): Promise<Context> {
       deployBefore: [],
       deployAfter: [],
     },
+    maxConcurrent: 5
   }
   const mergeOptions = defu({ ...config && Object.keys(config).length > 0 ? config : rawOptions }, defaultOption)
 
   async function execute(): Promise<void> {
-    const { username, port, password, ip, commend, uploadPath, target } = mergeOptions
+    const {
+      username,
+      port,
+      password,
+      ip,
+      commend,
+      uploadPath,
+      target,
+      maxConcurrent
+    } = mergeOptions
     const conn = new Client();
 
     const { uploadBefore, deployBefore, uploadAfter, deployAfter} = commend
@@ -47,7 +57,7 @@ export async function createContext(rawOptions?: Options): Promise<Context> {
       const uploadDir = uploadPath.substring(uploadPath.lastIndexOf(path.sep) + 1);
       consola.log(`\n${chalk.hex('#c792e9')('◐')} ${chalk.greenBright(`Uploading ${uploadDir}...`)}\n`);
 
-      uploadDirectory(conn, uploadPath, target).then(async () => {
+      uploadDirectory(conn, uploadPath, target, maxConcurrent).then(async () => {
         // 执行部署后的命令
         await remoteExecCommands(conn, deployAfter);
       }).finally(() => {
@@ -59,8 +69,8 @@ export async function createContext(rawOptions?: Options): Promise<Context> {
     }).on('close', async () => {
       // 执行上传后的命令
       await localExecCommands(uploadAfter);
-      process.stdout.write('\r\n');
-      consola.log(`🎉 ${chalk.green('auto deploy complete!')}`)
+      process.stdout.write('\n');
+      consola.log(`🎉 ${chalk.greenBright('auto deploy complete!')}`)
       process.exit(0);
     }).connect({
       host: ip,

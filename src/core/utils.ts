@@ -4,6 +4,7 @@ import { consola } from "consola";
 import chalk from "chalk";
 import {spawn} from "child_process";
 import {ConfigLayerMeta, loadConfig, ResolvedConfig, UserInputConfig} from "c12";
+import {UploadSpeedCalc} from "./speedCalc";
 
 export async function getConfig<T extends UserInputConfig = UserInputConfig, MT extends ConfigLayerMeta = ConfigLayerMeta>(): Promise<ResolvedConfig<T, MT>> {
   const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: 'ssh' });
@@ -36,66 +37,116 @@ export function getPackageManager(): string {
   }
 }
 
-export async function uploadDirectory(conn, localDir, remoteDir) {
-  const sftp = await new Promise((resolve, reject) => {
-    conn.sftp((err, sftp) => err ? reject(err) : resolve(sftp));
-  });
-
-  // 确保远程目录存在
-  await ensureRemoteDir(sftp, remoteDir);
-
-  // 读取本地目录内容
-  const items = fs.readdirSync(localDir);
-
-  for (const item of items) {
+function flattenPathMapping(items: string[], localDir: string, remoteDir: string): Map<string, string> {
+  return items.reduce<Map<string, string>>((acc, item) => {
     const localPath = path.join(localDir, item);
     const remotePath = path.join(remoteDir, item).replace(/\\/g, '/');
     const stats = fs.statSync(localPath);
 
     if (stats.isDirectory()) {
-      // 递归上传子目录
-      await uploadDirectory(conn, localPath, remotePath);
+      const mappings = flattenPathMapping(fs.readdirSync(localPath), localPath, remotePath);
+      mappings.forEach((value, key) => acc.set(key, value));
     } else {
-      // 上传文件
-      await uploadFile(sftp, localPath, remotePath);
+      acc.set(localPath, remotePath);
     }
+    return acc;
+  }, new Map<string, string>());
+}
+
+let uploadStartTime = 0;
+let uploadEndTime = 0;
+let uploadFiles = 0;
+let uploadTotalSize = 0;
+const { start, update, getAverageSpeed, formatSpeed, getRecentAverageSpeed } = UploadSpeedCalc();
+
+export async function uploadDirectory(conn, localDir: string, remoteDir: string, limit: number) {
+  const sftp = await new Promise((resolve, reject) => {
+    conn.sftp((err, sftp) => err ? reject(err) : resolve(sftp));
+  });
+
+  // 读取本地目录内容
+  const items = fs.readdirSync(localDir);
+
+  // 获取本地和服务器的文件地址映射
+  const mappings = flattenPathMapping(items, localDir, remoteDir);
+  const remotePaths: Set<string> = new Set(Array.from(mappings.values()).map(item => item.substring(0, item.lastIndexOf("/"))));
+  remotePaths.delete(remoteDir.endsWith("/") ? remoteDir.substring(0, remoteDir.length - 1) : remoteDir);
+
+  for (let remotePath of remotePaths) {
+    await ensureRemoteDir(sftp, remotePath);
   }
+
+  // 上传文件
+  const tasks: (() => Promise<void>)[] = [];
+  mappings.forEach((value, key) => tasks.push(() => uploadFile(sftp, key, value)));
+  uploadStartTime = performance.now();
+  process.stdout.write('\n');
+  const interval = setInterval(() => {
+    const uploadState = updateUploadState();
+    process.stdout.write(`\x1B[2K\r${uploadState}`);
+  }, 500);
+  try {
+    await executeBatchUpload(tasks, limit);
+  } finally {
+    clearInterval(interval);
+  }
+  process.stdout.write('\n');
+}
+
+async function executeBatchUpload(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+  const executing = new Set<Promise<any>>();
+
+  start();
+
+  for (const task of tasks) {
+    if (executing.size >= limit) {
+      await Promise.race(executing);
+    }
+
+    // 创建并执行新任务
+    const p = task().then(() => executing.delete(p));
+
+    executing.add(p);
+  }
+
+  // 等待所有剩余任务完成
+  await Promise.all(executing);
+}
+
+function updateUploadState(): string {
+  const diff = ((Math.max(uploadEndTime - uploadStartTime, 0)) / 1000).toFixed(2);
+  const files = `${chalk.blueBright('Files')}: ${chalk.greenBright(uploadFiles)}`;
+  const totalSize = `${chalk.blueBright('TotalSize')}: ${chalk.greenBright(formatSpeed(uploadTotalSize))}`;
+  const duration = `${chalk.blueBright('Duration')}: ${chalk.greenBright(`${diff}s`)}`;
+  const AVGRate = `${chalk.blueBright('AVG Rate')}: ${chalk.greenBright(getAverageSpeed())}`;
+  const rate = `${chalk.blueBright('Rate')}: ${chalk.greenBright(getRecentAverageSpeed(1))}`;
+  return `${files}   ${totalSize}   ${duration}   ${AVGRate}   ${rate}`;
 }
 
 export async function uploadFile(sftp, localPath, remotePath): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const readStream = fs.createReadStream(localPath);
     const writeStream = sftp.createWriteStream(remotePath);
 
     const fileStats = fs.statSync(localPath);
     const totalBytes = fileStats.size;
-    let uploadedBytes = 0;
-    let loading = null;
-    let progress = 0;
 
     readStream.on('data', (chunk) => {
-      uploadedBytes += chunk.length;
-      progress = Number(((uploadedBytes / totalBytes) * 100).toFixed(2));
-      const pathPrefix = path.resolve(process.cwd());
-      const shortPath = localPath.replace(pathPrefix + path.sep, '').replaceAll('\\', path.sep) as string;
-      if (progress < 100) {
-        if (!loading) {
-          loading = createLoading((active) => chalk.blue(`\r${active} uploading ${shortPath}  ${progress}%`))
-          loading.start();
-        }
-      } else {
-        loading && loading.stop();
-        consola.log(`\x1B[2K\r${chalk.green('√')} ${chalk.blue(shortPath)}`);
-      }
+      update(chunk.length);
     });
 
     readStream.pipe(writeStream)
       .on('close', () => {
-        resolve();
+        const pathPrefix = path.resolve(process.cwd());
+        const shortPath = localPath.replace(pathPrefix + path.sep, '').replaceAll('\\', path.sep) as string;
+        uploadEndTime = performance.now();
+        ++uploadFiles;
+        uploadTotalSize += totalBytes;
+        const uploadState = updateUploadState();
+        process.stdout.write(`\x1B[1F\x1B[0J\r${chalk.greenBright('√')} ${chalk.blue(shortPath)}\n\n${uploadState}`);
+        resolve()
       })
-      .on('error', (err) => {
-        reject(err);
-      });
+      .on('error', reject);
   });
 }
 

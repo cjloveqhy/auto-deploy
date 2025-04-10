@@ -48,9 +48,16 @@ export type Options = {
    * 上传前后及部署前后的执行命令
    */
   commend?: Commands
+  /**
+   * 最大并发上传文件个数
+   */
+  maxConcurrent?: number
 }
+
+export type MultiOptions = { [key: string]: Options }
 
 export type Context = {
   execute: () => Promise<void>
 }
-export const defineConfig = (config: Options): Options => config;
+
+export const defineConfig = (config: Options | MultiOptions): Options => config;
