@@ -1,6 +1,6 @@
 export * from './core/ctx';
 
-export type Commands = {
+export interface Commands {
   /**
    * 文件上传前执行脚本
    */
@@ -19,45 +19,59 @@ export type Commands = {
   deployAfter?: string[]
 }
 
-export type Options = {
+export interface Options {
   /**
-   * 服务器链接账号名
+   * server link account name
+   * @defaultValue root
    */
   username?: string
   /**
-   * 服务器链接密码
+   * server link password
    */
   password?: string
   /**
-   * ip地址
+   * ip address
    */
   ip?: string
   /**
-   * 服务器链接端口
+   * server link port
+   * @defaultValue 22
    */
   port?: number
   /**
-   * 上传至服务器文件路径
+   * file path to be uploaded to the server
+   * @defaultValue ~/{@link uploadPath}
    */
   target?: string
   /**
-   * 待上传文件路径
+   * path of the file to be uploaded
+   * @defaultValue dist
    */
   uploadPath?: string
   /**
-   * 上传前后及部署前后的执行命令
+   * execute commands before and after upload and deployment
    */
   commend?: Commands
   /**
-   * 最大并发上传文件个数
+   * maximum number of files to be uploaded concurrently
+   * @defaultValue 5
    */
   maxConcurrent?: number
+  /**
+   * whether to use the default packaging command. This command is enabled by default
+   * @defaultValue true
+   */
+  defaultBuild?: boolean
 }
 
-export type MultiOptions = { [key: string]: Options }
+export type MultiOptions = {
+  mode?: string[] | string
+} & Record<string, Options>
 
-export type Context = {
-  execute: () => Promise<void>
+export type ResolveConfig = Options | MultiOptions
+
+export interface Context {
+  execute: (() => Promise<void>)
 }
 
-export const defineConfig = (config: Options | MultiOptions): Options => config;
+export const defineConfig = (config: ResolveConfig): ResolveConfig => config;

@@ -4,7 +4,7 @@ import { consola } from "consola";
 import chalk from "chalk";
 import {spawn} from "child_process";
 import {ConfigLayerMeta, loadConfig, ResolvedConfig, UserInputConfig} from "c12";
-import {UploadSpeedCalc} from "./speedCalc";
+import {MultiOptions, ResolveConfig} from "../index";
 
 export async function getConfig<T extends UserInputConfig = UserInputConfig, MT extends ConfigLayerMeta = ConfigLayerMeta>(): Promise<ResolvedConfig<T, MT>> {
   const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: 'ssh' });
@@ -15,7 +15,7 @@ export async function getConfig<T extends UserInputConfig = UserInputConfig, MT 
   return { config, ...resolvedConfig };
 }
 
-export function slash(str) {
+export function slash(str): string {
   return str.replace(/\\/g, "/");
 }
 
@@ -23,7 +23,7 @@ export function getBuildOutDir(path: string): string | undefined {
   return getRootPath(path)
 }
 
-function getRootPath(...dir: string[]) {
+function getRootPath(...dir: string[]): string {
   return path.resolve(process.cwd(), ...dir);
 }
 
@@ -37,10 +37,10 @@ export function getPackageManager(): string {
   }
 }
 
-function flattenPathMapping(items: string[], localDir: string, remoteDir: string): Map<string, string> {
+export function flattenPathMapping(items: string[], localDir: string, remoteDir: string): Map<string, string> {
   return items.reduce<Map<string, string>>((acc, item) => {
     const localPath = path.join(localDir, item);
-    const remotePath = path.join(remoteDir, item).replace(/\\/g, '/');
+    const remotePath = slash(path.join(remoteDir, item));
     const stats = fs.statSync(localPath);
 
     if (stats.isDirectory()) {
@@ -53,118 +53,31 @@ function flattenPathMapping(items: string[], localDir: string, remoteDir: string
   }, new Map<string, string>());
 }
 
-let uploadStartTime = 0;
-let uploadEndTime = 0;
-let uploadFiles = 0;
-let uploadTotalSize = 0;
-const { start, update, getAverageSpeed, formatSpeed, getRecentAverageSpeed } = UploadSpeedCalc();
+export function isMulti(config: ResolveConfig): boolean {
+  return 'mode' in config || Object.keys(config).some(key => !['commend'].includes(key) && typeof config[key] === 'object');
+}
 
-export async function uploadDirectory(conn, localDir: string, remoteDir: string, limit: number) {
-  const sftp = await new Promise((resolve, reject) => {
-    conn.sftp((err, sftp) => err ? reject(err) : resolve(sftp));
-  });
-
-  // 读取本地目录内容
-  const items = fs.readdirSync(localDir);
-
-  // 获取本地和服务器的文件地址映射
-  const mappings = flattenPathMapping(items, localDir, remoteDir);
-  const remotePaths: Set<string> = new Set(Array.from(mappings.values()).map(item => item.substring(0, item.lastIndexOf("/"))));
-  remotePaths.delete(remoteDir.endsWith("/") ? remoteDir.substring(0, remoteDir.length - 1) : remoteDir);
-
-  for (let remotePath of remotePaths) {
-    await ensureRemoteDir(sftp, remotePath);
+export function getMode(config: MultiOptions): string[] {
+  const _mode: string[] = [];
+  if (config.mode) {
+    _mode.push(...typeof config.mode === 'string' ? [config.mode] : config.mode);
   }
-
-  // 上传文件
-  const tasks: (() => Promise<void>)[] = [];
-  mappings.forEach((value, key) => tasks.push(() => uploadFile(sftp, key, value)));
-  uploadStartTime = performance.now();
-  process.stdout.write('\n');
-  const interval = setInterval(() => {
-    const uploadState = updateUploadState();
-    process.stdout.write(`\x1B[2K\r${uploadState}`);
-  }, 500);
-  try {
-    await executeBatchUpload(tasks, limit);
-  } finally {
-    clearInterval(interval);
-  }
-  process.stdout.write('\n');
+  return _mode;
 }
 
-async function executeBatchUpload(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
-  const executing = new Set<Promise<any>>();
-
-  start();
-
-  for (const task of tasks) {
-    if (executing.size >= limit) {
-      await Promise.race(executing);
-    }
-
-    // 创建并执行新任务
-    const p = task().then(() => executing.delete(p));
-
-    executing.add(p);
-  }
-
-  // 等待所有剩余任务完成
-  await Promise.all(executing);
-}
-
-function updateUploadState(): string {
-  const diff = ((Math.max(uploadEndTime - uploadStartTime, 0)) / 1000).toFixed(2);
-  const files = `${chalk.blueBright('Files')}: ${chalk.greenBright(uploadFiles)}`;
-  const totalSize = `${chalk.blueBright('TotalSize')}: ${chalk.greenBright(formatSpeed(uploadTotalSize))}`;
-  const duration = `${chalk.blueBright('Duration')}: ${chalk.greenBright(`${diff}s`)}`;
-  const AVGRate = `${chalk.blueBright('AVG Rate')}: ${chalk.greenBright(getAverageSpeed())}`;
-  const rate = `${chalk.blueBright('Rate')}: ${chalk.greenBright(getRecentAverageSpeed(1))}`;
-  return `${files}   ${totalSize}   ${duration}   ${AVGRate}   ${rate}`;
-}
-
-export async function uploadFile(sftp, localPath, remotePath): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const readStream = fs.createReadStream(localPath);
-    const writeStream = sftp.createWriteStream(remotePath);
-
-    const fileStats = fs.statSync(localPath);
-    const totalBytes = fileStats.size;
-
-    readStream.on('data', (chunk) => {
-      update(chunk.length);
-    });
-
-    readStream.pipe(writeStream)
-      .on('close', () => {
-        const pathPrefix = path.resolve(process.cwd());
-        const shortPath = localPath.replace(pathPrefix + path.sep, '').replaceAll('\\', path.sep) as string;
-        uploadEndTime = performance.now();
-        ++uploadFiles;
-        uploadTotalSize += totalBytes;
-        const uploadState = updateUploadState();
-        process.stdout.write(`\x1B[1F\x1B[0J\r${chalk.greenBright('√')} ${chalk.blue(shortPath)}\n\n${uploadState}`);
-        resolve()
-      })
-      .on('error', reject);
-  });
-}
-
-export async function ensureRemoteDir(sftp, remoteDir): Promise<void> {
-  return new Promise((resolve, reject) => {
-    sftp.stat(remoteDir, (err) => {
-      if (err && err.code === 2) {
-        sftp.mkdir(remoteDir, { recursive: true }, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      } else if (err) {
-        reject(err);
-      } else {
-        resolve();
+export function mergeMode(...configs: MultiOptions[]): string[] {
+  const mode: string[][] = [];
+  configs.forEach(config => mode.push(getMode(config)));
+  const _mode = mode.reduce((acc, current) => {
+    for (const value of current) {
+      if (!acc.includes(value)) {
+        acc.push(value);
       }
-    });
-  });
+    }
+    return acc;
+  }, []);
+  if (_mode.length === 0) _mode.push('default');
+  return _mode;
 }
 
 async function execWithLiveOutput(cmd): Promise<void> {
@@ -176,21 +89,23 @@ async function execWithLiveOutput(cmd): Promise<void> {
 
     child.on('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`command failed with code ${code}`));
+      else reject();
+    }).on('error', (err) => {
+      reject(new Error(err));
     });
   });
 }
 
-export async function localExecCommands(commands: string[] = []) {
+export async function localExecCommands(commands: string[] = []): Promise<void> {
   // 执行上传阶段的命令
   for (const cmd of commands) {
     consola.log(`> ${cmd}`)
-    await execWithLiveOutput(cmd)
+    await execWithLiveOutput(cmd);
   }
 }
 
-async function execRemoteWithLiveOutput(conn, cmd: string) {
-  return new Promise((resolve, reject) => {
+async function execRemoteWithLiveOutput(conn, cmd: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     conn.exec(cmd, (err, stream) => {
       if (err) reject(err);
       stream.on('data', (data) => process.stdout.write(data))
@@ -200,7 +115,7 @@ async function execRemoteWithLiveOutput(conn, cmd: string) {
   })
 }
 
-export async function remoteExecCommands(conn, commands: string[] = []) {
+export async function remoteExecCommands(conn, commands: string[] = []): Promise<void> {
   // 执行部署阶段的命令
   for (const cmd of commands) {
     await execRemoteWithLiveOutput(conn, cmd);
