@@ -88,6 +88,17 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     await executeToMode(modeValue);
   }
 
+  function getUnregisteredModes(): string[] {
+    const unregistered: string[] = [];
+    for (const key in mergeOptions) {
+      if (key === 'mode') continue;
+      if (typeof mergeOptions[key] === 'object' && mergeOptions[key].ip) {
+        unregistered.push(key);
+      }
+    }
+    return unregistered;
+  }
+
   async function execute(): Promise<void> {
     const modes = mergeOptions.mode as string[];
     if (modes.length > 1) {
@@ -103,7 +114,8 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
       if (mode in mergeOptions) {
         await executeToMode(mode);
       } else {
-        await selectExecute(modes, `\`${mode}\` mode not found，Please select the mode to execute.`);
+        const unregisteredModes = getUnregisteredModes();
+        await selectExecute(unregisteredModes, `\`${mode}\` mode not found，Please select the mode to execute.`);
       }
     }
   }
