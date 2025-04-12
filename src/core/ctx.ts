@@ -3,8 +3,10 @@ import {
   getBuildOutDir,
   getConfig,
   getPackageManager,
+  getPrivateKey,
   isMulti,
-  localExecCommands, mergeMode,
+  localExecCommands,
+  mergeMode,
   remoteExecCommands,
 } from "./utils";
 import defu from "defu";
@@ -50,11 +52,14 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     const _options = _config[configKey] || {};
     let _rawOptions = configKey in _rawConfig ? _rawConfig[configKey] : {};
     const uploadDir = _rawOptions.uploadPath || _options.uploadPath || 'dist';
+    const privateKeyPath = _rawOptions.privateKey || _options.privateKey;
     const outDir = getBuildOutDir(uploadDir);
+    const currentMergeOption = { ..._rawOptions, ..._options };
 
     mergeOptions[configKey] = defu({
       uploadPath: outDir,
-    }, defu(_rawOptions, _options, getDefaultCommand(defu(_rawOptions, _options, _defaultOption)), _defaultOption));
+      privateKey: getPrivateKey(privateKeyPath),
+    }, defu(currentMergeOption, getDefaultCommand(defu(currentMergeOption, _defaultOption)), _defaultOption));
   }
 
   for (const configKey in _rawConfig) {
@@ -66,7 +71,7 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
 
     mergeOptions[configKey] = defu({
       uploadPath: outDir,
-      target: `~\\${uploadDir}`,
+      privateKey: getPrivateKey(_options.privateKey),
     }, defu(_options, getDefaultCommand(defu(_options, _defaultOption)), _defaultOption));
   }
 
@@ -77,7 +82,7 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
       selectOptions.push({
         label: mode,
         value: mode,
-        hint: `${option.username}@${option.ip}:${option.port}`,
+        hint: `${option.username}@${option.host}:${option.port}`,
       })
     }
     const modeValue = await consola.prompt(msg, {
@@ -92,7 +97,7 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     const unregistered: string[] = [];
     for (const key in mergeOptions) {
       if (key === 'mode') continue;
-      if (typeof mergeOptions[key] === 'object' && mergeOptions[key].ip) {
+      if (typeof mergeOptions[key] === 'object' && mergeOptions[key].host) {
         unregistered.push(key);
       }
     }
@@ -102,11 +107,12 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
   async function execute(): Promise<void> {
     const modes = mergeOptions.mode as string[];
     if (modes.length > 1) {
-      const result = await consola.prompt('There are currently multiple upload \`mode\`, Are you sure you want to upload all of them?', {
+      const result = await consola.prompt(`There are currently multiple upload mode：${chalk.blueBright(`[${modes.join(',')}]`)}, Are you sure you want to upload all of them? `, {
         type: 'confirm',
       });
       if (!result) {
         await selectExecute(modes, 'There are multiple `mode` available. Please select one to execute.');
+        process.exit(0);
         return await Promise.resolve();
       }
     }
@@ -118,6 +124,7 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
         await selectExecute(unregisteredModes, `\`${mode}\` mode not found，Please select the mode to execute.`);
       }
     }
+    process.exit(0);
   }
 
   async function executeToMode(mode: string = 'default'): Promise<void> {
@@ -126,7 +133,8 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
         username,
         port,
         password,
-        ip,
+        host,
+        privateKey,
         commend,
         uploadPath,
         target,
@@ -163,14 +171,17 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
         // 执行上传后的命令
         await localExecCommands(uploadAfter);
         process.stdout.write('\n');
-        consola.log(`🎉 ${chalk.greenBright('auto deploy complete!')}`)
+        const modes = mergeOptions.mode as string[];
+        const finishPrefix = `${chalk.blueBright(`[${mode}] ${modes.length > 1 ? host : ''}`)}`;
+        consola.log(`🎉 ${chalk.greenBright(`${finishPrefix} auto deploy complete!`)}`);
+        conn.end();
         resolve();
-        process.exit(0);
       }).connect({
-        host: ip,
+        host,
         port,
         username,
         password,
+        privateKey,
       });
     });
   }
