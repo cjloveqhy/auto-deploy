@@ -30,9 +30,13 @@ export interface Options {
    */
   password?: string
   /**
-   * ip address
+   * server link private key
    */
-  ip?: string
+  privateKey?: string | Buffer
+  /**
+   * server host
+   */
+  host?: string
   /**
    * server link port
    * @defaultValue 22

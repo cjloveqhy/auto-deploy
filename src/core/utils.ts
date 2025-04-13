@@ -6,10 +6,11 @@ import {spawn} from "child_process";
 import {ConfigLayerMeta, loadConfig, ResolvedConfig, UserInputConfig} from "c12";
 import {MultiOptions, ResolveConfig} from "../index";
 
+const configName = 'auto-deploy';
 export async function getConfig<T extends UserInputConfig = UserInputConfig, MT extends ConfigLayerMeta = ConfigLayerMeta>(): Promise<ResolvedConfig<T, MT>> {
-  const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: 'ssh' });
+  const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: configName });
   if (!config || Object.keys(config).length === 0) {
-    consola.error(`Configure in the project root path:\n${chalk.blue('ssh.config.ts')}\n${chalk.blue('ssh.config.js')}\n${chalk.blue('ssh.config.json')}\n${chalk.blue('ssh.config.mjs')}\n${chalk.blue('ssh.config.cjs')}`);
+    consola.error(`Configure in the project root path:\n${chalk.blue(`${configName}.config.ts`)}\n${chalk.blue(`${configName}.config.js`)}\n${chalk.blue(`${configName}.config.json`)}\n${chalk.blue(`${configName}.config.mjs`)}\n${chalk.blue(`${configName}.config.cjs`)}`);
     return;
   }
   return { config, ...resolvedConfig };
@@ -25,6 +26,10 @@ export function getBuildOutDir(path: string): string | undefined {
 
 function getRootPath(...dir: string[]): string {
   return path.resolve(process.cwd(), ...dir);
+}
+
+export function getPrivateKey(path: string | Buffer): Buffer {
+  return typeof path === 'string' ? fs.readFileSync(path) : path;
 }
 
 export function getPackageManager(): string {
