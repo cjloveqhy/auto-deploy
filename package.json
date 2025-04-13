@@ -47,17 +47,17 @@
     "up version": "bumpp package.json --commit --push --no-tag"
   },
   "dependencies": {
-    "c12": "^1.11.2",
-    "chalk": "^5.3.0",
-    "commander": "^12.1.0",
-    "consola": "^3.2.3",
+    "c12": "^3.0.3",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "consola": "^3.4.2",
     "defu": "^6.1.4",
     "ssh2": "^1.16.0",
     "tsup": "^8.4.0"
   },
   "devDependencies": {
     "@types/lodash": "^4.17.16",
-    "@types/node": "^22.14.0",
+    "@types/node": "^22.14.1",
     "bumpp": "^10.1.0",
     "typescript": "^5.8.3"
   }
