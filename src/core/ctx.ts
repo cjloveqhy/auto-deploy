@@ -1,5 +1,6 @@
 import {Context, Options, ResolveConfig, MultiOptions} from "../index";
 import {
+  deployCommandEndSymbol,
   getBuildOutDir,
   getConfig,
   getPackageManager,
@@ -11,9 +12,8 @@ import {
 } from "./utils";
 import defu from "defu";
 import { consola } from 'consola';
-import { Client } from 'ssh2';
 import chalk from "chalk";
-import path from "node:path";
+import { sep } from "node:path";
 import {remoteUploadFile} from "./upload";
 
 export async function createContext(rawOptions?: ResolveConfig): Promise<Context> {
@@ -28,6 +28,7 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     username: 'root',
     port: 22,
     commend: {
+      shell: true,
       uploadBefore: [],
       uploadAfter: [],
       deployBefore: [],
@@ -35,12 +36,35 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     },
     maxConcurrent: 5,
     defaultBuild: true,
+    readyTimeout: 2000,
+    strictVendor: true,
+    keepaliveInterval: 0,
+    keepaliveCountMax: 3,
+    forceIPv4: false,
+    forceIPv6: false,
+    bastion: {
+      enabled: false,
+      listen: {
+        ip: '127.0.0.1',
+        port: 12345
+      },
+      username: 'root',
+      port: 22,
+      readyTimeout: 2000,
+      strictVendor: true,
+      keepaliveInterval: 0,
+      keepaliveCountMax: 3,
+      forceIPv4: false,
+      forceIPv6: false,
+    }
   }
 
   function getDefaultCommand(options: Options): Options {
     return {
       commend: {
         uploadBefore: options.defaultBuild ? [`${getPackageManager()} run build`] : [],
+        deployBefore: [`echo "${deployCommandEndSymbol}"\n`],
+        deployAfter: [`echo "${deployCommandEndSymbol}"\n`],
       },
       target: options.target || `~\\${options.uploadPath}`,
     };
@@ -53,12 +77,16 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     let _rawOptions = configKey in _rawConfig ? _rawConfig[configKey] : {};
     const uploadDir = _rawOptions.uploadPath || _options.uploadPath || 'dist';
     const privateKeyPath = _rawOptions.privateKey || _options.privateKey;
+    const bastionPrivateKeyPath = _rawOptions.bastion?.privateKey || _options.bastion?.privateKey;
     const outDir = getBuildOutDir(uploadDir);
     const currentMergeOption = { ..._rawOptions, ..._options };
 
     mergeOptions[configKey] = defu({
       uploadPath: outDir,
       privateKey: getPrivateKey(privateKeyPath),
+      bastion: {
+        privateKey: getPrivateKey(bastionPrivateKeyPath),
+      }
     }, defu(currentMergeOption, getDefaultCommand(defu(currentMergeOption, _defaultOption)), _defaultOption));
   }
 
@@ -72,6 +100,9 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     mergeOptions[configKey] = defu({
       uploadPath: outDir,
       privateKey: getPrivateKey(_options.privateKey),
+      bastion: {
+        privateKey: getPrivateKey(_options.bastion?.privateKey),
+      }
     }, defu(_options, getDefaultCommand(defu(_options, _defaultOption)), _defaultOption));
   }
 
@@ -128,60 +159,46 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
   }
 
   async function executeToMode(mode: string = 'default'): Promise<void> {
-    return new Promise<void>(async (resolve, reject) => {
-      const {
-        username,
-        port,
-        password,
-        host,
-        privateKey,
-        commend,
-        uploadPath,
-        target,
-        maxConcurrent
-      } = mergeOptions[mode];
-      const conn = new Client();
+    return new Promise<void>(async (resolve) => {
+      const options = mergeOptions[mode];
+      const { host, commend, uploadPath } = options;
 
       const { uploadBefore, deployBefore, uploadAfter, deployAfter} = commend;
 
       // 执行上传前的命令
-      await localExecCommands(uploadBefore);
+      await localExecCommands(uploadBefore, commend.shell);
 
-      conn.on('ready', async () => {
+      const { getConnection, uploadDirectory } = remoteUploadFile();
+
+      const { targetConn, middleConn } = await getConnection(options);
+
+      const modes = mergeOptions.mode as string[];
+      const finishPrefix = `${chalk.blueBright(`[${mode}] ${modes.length > 1 ? host + ' ' : ''}`)}`;
+
+      targetConn.on('ready', async () => {
 
         // 执行部署前的命令
-        await remoteExecCommands(conn, deployBefore);
+        await remoteExecCommands(targetConn, deployBefore, commend.shell);
 
-        const uploadDir = uploadPath.substring(uploadPath.lastIndexOf(path.sep) + 1);
-        consola.log(`\n${chalk.hex('#c792e9')('◐')} ${chalk.greenBright(`Uploading ${uploadDir}...`)}\n`);
+        const uploadDir = uploadPath.substring(uploadPath.lastIndexOf(sep) + 1);
+        consola.log(`\n${chalk.hex('#c792e9')('◐')} ${chalk.greenBright(`Uploading ${finishPrefix}${uploadDir}...`)}\n`);
 
-        const { uploadDirectory } = remoteUploadFile();
-
-        uploadDirectory(conn, uploadPath, target, maxConcurrent).then(async () => {
+        uploadDirectory(targetConn, options).then(async () => {
           // 执行部署后的命令
-          await remoteExecCommands(conn, deployAfter);
+          await remoteExecCommands(targetConn, deployAfter, commend.shell);
         }).finally(() => {
-          conn.end();
+          targetConn.end();
         });
-      }).on('error', (err) => {
-        consola.error('SSH connection error:', err);
-        reject(err);
-        conn.end();
       }).on('close', async () => {
         // 执行上传后的命令
-        await localExecCommands(uploadAfter);
-        process.stdout.write('\n');
-        const modes = mergeOptions.mode as string[];
-        const finishPrefix = `${chalk.blueBright(`[${mode}] ${modes.length > 1 ? host : ''}`)}`;
-        consola.log(`🎉 ${chalk.greenBright(`${finishPrefix} auto deploy complete!`)}`);
-        conn.end();
+        await localExecCommands(uploadAfter, commend.shell);
+        consola.log(`\n🎉 ${chalk.greenBright(`${finishPrefix}auto deploy complete!\n`)}`);
+        targetConn.end();
+        const { enabled } = options.bastion;
+        if (enabled) {
+          middleConn.end();
+        }
         resolve();
-      }).connect({
-        host,
-        port,
-        username,
-        password,
-        privateKey,
       });
     });
   }

@@ -2,6 +2,11 @@ export * from './core/ctx';
 
 export interface Commands {
   /**
+   * enable an interactive shell session
+   * @defaultValue true
+   */
+  shell?: boolean
+  /**
    * 文件上传前执行脚本
    */
   uploadBefore?: string[]
@@ -18,6 +23,32 @@ export interface Commands {
    */
   deployAfter?: string[]
 }
+
+export interface BastionHostBase {
+  /**
+   * enable bastion host service
+   * @defaultValue false
+   */
+  enabled?: boolean
+  /**
+   * bastion host listen config
+   */
+  listen?: {
+    /**
+     * bastion host local listen ip address
+     * @defaultValue 127.0.0.1
+     */
+    ip?: string
+    /**
+     * bastion host local listen port
+     * @defaultValue 12345
+     */
+    port?: number
+  }
+}
+
+export type BastionHostOmit = 'target' | 'uploadPath' | 'commend' | 'maxConcurrent' | 'defaultBuild' | 'bastion';
+export interface BastionHost extends Omit<Options, BastionHostOmit>, BastionHostBase {}
 
 export interface Options {
   /**
@@ -66,6 +97,41 @@ export interface Options {
    * @defaultValue true
    */
   defaultBuild?: boolean
+  /**
+   * bastion host link info
+   * @defaultValue { username: 'root' }
+   */
+  bastion?: BastionHost
+  /**
+   * How long (in milliseconds) to wait for the SSH handshake to complete.
+   * @defaultValue 20000 (integer)
+   */
+  readyTimeout?: number
+  /**
+   * Performs a strict server vendor check before sending vendor-specific requests, etc. (e.g. check for OpenSSH server when using `openssh_noMoreSessions()`)
+   * @defaultValue true
+   */
+  strictVendor?: boolean
+  /**
+   * How often (in milliseconds) to send SSH-level keepalive packets to the server (in a similar way as OpenSSH's ServerAliveInterval config option). Set to 0 to disable.
+   * @defaultValue 0 (integer)
+   */
+  keepaliveInterval?: number
+  /**
+   * How many consecutive, unanswered SSH-level keepalive packets that can be sent to the server before disconnection (similar to OpenSSH's ServerAliveCountMax config option).
+   * @defaultValue 3 (integer)
+   */
+  keepaliveCountMax?: number
+  /**
+   * Only connect via resolved IPv4 address for `host`.
+   * @defaultValue false
+   */
+  forceIPv4?: boolean
+  /**
+   * Only connect via resolved IPv6 address for `host`.
+   * @defaultValue false
+   */
+  forceIPv6?: boolean
 }
 
 export type MultiOptions = {

@@ -1,12 +1,13 @@
 import * as path from "path";
 import * as fs from "node:fs";
-import { consola } from "consola";
+import {consola} from "consola";
 import chalk from "chalk";
 import {spawn} from "child_process";
 import {ConfigLayerMeta, loadConfig, ResolvedConfig, UserInputConfig} from "c12";
 import {MultiOptions, ResolveConfig} from "../index";
 
 const configName = 'auto-deploy';
+export const deployCommandEndSymbol = '__HAPPYC__AUTO__DEPLOY__END__';
 export async function getConfig<T extends UserInputConfig = UserInputConfig, MT extends ConfigLayerMeta = ConfigLayerMeta>(): Promise<ResolvedConfig<T, MT>> {
   const { config, ...resolvedConfig } = await loadConfig<T, MT>({ name: configName });
   if (!config || Object.keys(config).length === 0) {
@@ -59,7 +60,7 @@ export function flattenPathMapping(items: string[], localDir: string, remoteDir:
 }
 
 export function isMulti(config: ResolveConfig): boolean {
-  return 'mode' in config || Object.keys(config).some(key => !['commend'].includes(key) && typeof config[key] === 'object');
+  return 'mode' in config || Object.keys(config).some(key => !['commend', 'bastion', 'privateKey'].includes(key) && typeof config[key] === 'object');
 }
 
 export function getMode(config: MultiOptions): string[] {
@@ -85,27 +86,25 @@ export function mergeMode(...configs: MultiOptions[]): string[] {
   return _mode;
 }
 
-async function execWithLiveOutput(cmd): Promise<void> {
+async function execWithLiveOutput(cmd: string, shell: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, {
       stdio: 'inherit',
-      shell: true,
+      shell
     });
 
     child.on('close', (code) => {
       if (code === 0) resolve();
       else reject();
-    }).on('error', (err) => {
-      reject(new Error(err));
-    });
+    }).on('error', (err) => reject(err));
   });
 }
 
-export async function localExecCommands(commands: string[] = []): Promise<void> {
+export async function localExecCommands(commands: string[] = [], shell: boolean): Promise<void> {
   // 执行上传阶段的命令
   for (const cmd of commands) {
     consola.log(`> ${cmd}`)
-    await execWithLiveOutput(cmd);
+    await execWithLiveOutput(cmd, shell);
   }
 }
 
@@ -116,15 +115,78 @@ async function execRemoteWithLiveOutput(conn, cmd: string): Promise<void> {
       stream.on('data', (data) => process.stdout.write(data))
         .stderr.on('data', (data) => process.stderr.write(data))
         .on('close', resolve);
-    })
-  })
+    });
+  });
 }
 
-export async function remoteExecCommands(conn, commands: string[] = []): Promise<void> {
-  // 执行部署阶段的命令
-  for (const cmd of commands) {
-    await execRemoteWithLiveOutput(conn, cmd);
+async function shellExecRemoteWithLiveOutput(conn, commands: string[] = []): Promise<void> {
+  const stream = await new Promise((resolve, reject) => {
+    conn.shell((err, stream) => err ? reject(err) : resolve(stream));
+  });
+  let currentCommandIndex = 0;
+
+  function sendNextCommand(stream) {
+    if (currentCommandIndex < commands.length) {
+      const cmd = commands[currentCommandIndex] + '\n';
+      stream.write(cmd);
+      currentCommandIndex++;
+    }
   }
+  process.stdout.write('\n');
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', (data) => {
+      const result = data.toString();
+      if (['error', 'command not found'].includes(result)) {
+        process.stderr.write(data);
+        reject();
+      } else {
+        if ((currentCommandIndex > 1 && currentCommandIndex <= commands.length)) {
+          if (!result.includes(deployCommandEndSymbol)) {
+            process.stdout.write(data);
+          }
+        }
+        sendNextCommand(stream);
+        if (currentCommandIndex === commands.length && result.includes(deployCommandEndSymbol)) {
+          resolve();
+        }
+      }
+    });
+
+    sendNextCommand(stream);
+  });
+  process.stdout.write('\n');
+}
+
+// 执行部署阶段的命令
+export async function remoteExecCommands(conn, commands: string[] = [], shell: boolean): Promise<void> {
+  if (commands.length === 1 && commands[0].includes(deployCommandEndSymbol)) {
+    return Promise.resolve();
+  }
+  if (shell) {
+    await shellExecRemoteWithLiveOutput(conn, commands);
+  } else {
+    for (const cmd of commands) {
+      await execRemoteWithLiveOutput(conn, cmd);
+    }
+  }
+}
+
+export async function taskExecute(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+  const executing = new Set<Promise<any>>();
+
+  for (const task of tasks) {
+    if (executing.size >= limit) {
+      await Promise.race(executing);
+    }
+
+    // 创建并执行新任务
+    const p = task().then(() => executing.delete(p));
+
+    executing.add(p);
+  }
+
+  // 等待所有剩余任务完成
+  await Promise.all(executing);
 }
 
 export function createLoading(format: ((active: string, current: number) => string)) {

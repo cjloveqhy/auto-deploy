@@ -1,8 +1,15 @@
 import {UploadSpeedCalc} from "./speedCalc";
-import fs from "node:fs";
+import { readdirSync, createReadStream } from "node:fs";
 import chalk from "chalk";
-import path from "path";
-import {flattenPathMapping, slash} from "./utils";
+import { resolve as pathResolve, sep } from "path";
+import {flattenPathMapping, slash, taskExecute} from "./utils";
+import {Options} from "../index";
+import {consola} from "consola";
+import { Client } from 'ssh2';
+import { omit } from "lodash-es";
+
+export type Clients = { targetConn: Client, middleConn?: Client }
+const bastionHostOmit = ['target', 'uploadPath', 'commend', 'maxConcurrent', 'defaultBuild', 'bastion'];
 
 export function remoteUploadFile() {
 
@@ -13,18 +20,19 @@ export function remoteUploadFile() {
 
   const { start, update, getAverageSpeed, formatSpeed, getRecentAverageSpeed } = UploadSpeedCalc();
 
-  async function uploadDirectory(conn, localDir: string, remoteDir: string, limit: number) {
+  async function uploadDirectory(conn, options: Options): Promise<void> {
+    const { uploadPath, target, maxConcurrent } = options;
     const sftp = await new Promise((resolve, reject) => {
       conn.sftp((err, sftp) => err ? reject(err) : resolve(sftp));
     });
 
     // 读取本地目录内容
-    const items = fs.readdirSync(localDir);
+    const items = readdirSync(uploadPath);
 
     // 获取本地和服务器的文件地址映射
-    const mappings = flattenPathMapping(items, localDir, remoteDir);
+    const mappings = flattenPathMapping(items, uploadPath, target);
     const remotePaths: Set<string> = new Set(Array.from(mappings.values()).map(item => item.substring(0, item.lastIndexOf("/"))));
-    remotePaths.delete(remoteDir.endsWith("/") ? remoteDir.substring(0, remoteDir.length - 1) : remoteDir);
+    remotePaths.delete(target.endsWith("/") ? target.substring(0, target.length - 1) : target);
 
     for (let remotePath of remotePaths) {
       await ensureRemoteDir(sftp, remotePath);
@@ -38,33 +46,68 @@ export function remoteUploadFile() {
     const interval = setInterval(() => {
       const uploadState = updateUploadState();
       process.stdout.write(`\x1B[2K\r${uploadState}`);
-    }, 500);
+    }, 100);
     try {
-      await executeBatchUpload(tasks, limit);
+      await executeBatchUpload(tasks, maxConcurrent);
     } finally {
       clearInterval(interval);
     }
     process.stdout.write('\n');
   }
 
-  async function executeBatchUpload(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
-    const executing = new Set<Promise<any>>();
-
-    start();
-
-    for (const task of tasks) {
-      if (executing.size >= limit) {
-        await Promise.race(executing);
-      }
-
-      // 创建并执行新任务
-      const p = task().then(() => executing.delete(p));
-
-      executing.add(p);
+  async function getConnection(options: Options): Promise<Clients> {
+    if (options.bastion?.enabled) {
+      return getForwardOutConn(options);
+    } else {
+      return getDefaultConn(options);
     }
+  }
 
-    // 等待所有剩余任务完成
-    await Promise.all(executing);
+  async function getDefaultConn(options: Options): Promise<Clients> {
+    const conn = new Client();
+    await conn.on('error', (err) => {
+      consola.error('SSH connection error:', err);
+      Promise.reject(err);
+      conn.end();
+    }).connect(omit(options, bastionHostOmit));
+    return { targetConn: conn };
+  }
+
+  async function getForwardOutConn(options: Options): Promise<Clients> {
+    const middleConn = new Client();
+    const targetConn = new Client();
+    const {
+      host,
+      port,
+      username,
+      listen
+    } = options.bastion;
+
+    middleConn.on('ready', async () => {
+      consola.log(`${chalk.greenBright(`√ Bastion host: ${chalk.blueBright(`[${username}@${host}:${port}]`)} connection success.`)}`);
+
+      const passage = await new Promise((resolve, reject) => {
+        middleConn.forwardOut(listen.ip, listen.port, options.host, options.port, (err, passage) => err ? reject(err) : resolve(passage));
+      });
+
+      await targetConn.connect({
+        sock: passage,
+        ...omit(options, [...bastionHostOmit, 'enable', 'listen', 'host', 'port']),
+      });
+    }).on('error', (err) => {
+      consola.error('Bastion SSH connection error:', err);
+      Promise.reject(err);
+      middleConn.end();
+    }).connect(omit(options.bastion, bastionHostOmit));
+    return {
+      middleConn,
+      targetConn,
+    };
+  }
+
+  async function executeBatchUpload(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+    start();
+    await taskExecute(tasks, limit);
   }
 
   function updateUploadState(): string {
@@ -79,23 +122,20 @@ export function remoteUploadFile() {
 
   async function uploadFile(sftp, localPath: string, remotePath: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const readStream = fs.createReadStream(localPath);
+      const readStream = createReadStream(localPath);
       const writeStream = sftp.createWriteStream(remotePath);
-
-      const fileStats = fs.statSync(localPath);
-      const totalBytes = fileStats.size;
 
       readStream.on('data', (chunk) => {
         update(chunk.length);
+        uploadTotalSize += chunk.length;
+        uploadEndTime = performance.now();
       });
 
       readStream.pipe(writeStream)
         .on('close', () => {
-          const pathPrefix = path.resolve(process.cwd());
-          const shortPath = slash(localPath.replace(pathPrefix + path.sep, ''));
-          uploadEndTime = performance.now();
+          const pathPrefix = pathResolve(process.cwd());
+          const shortPath = slash(localPath.replace(pathPrefix + sep, ''));
           ++uploadFiles;
-          uploadTotalSize += totalBytes;
           const uploadState = updateUploadState();
           process.stdout.write(`\x1B[1F\x1B[0J\r${chalk.greenBright('√')} ${chalk.blue(shortPath)}\n\n${uploadState}`);
           resolve()
@@ -122,6 +162,7 @@ export function remoteUploadFile() {
   }
 
   return {
+    getConnection,
     uploadDirectory,
     uploadFile,
     ensureRemoteDir,
