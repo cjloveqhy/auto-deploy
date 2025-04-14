@@ -1,6 +1,5 @@
 import {Context, Options, ResolveConfig, MultiOptions} from "../index";
 import {
-  deployCommandEndSymbol,
   getBuildOutDir,
   getConfig,
   getPackageManager,
@@ -63,8 +62,6 @@ export async function createContext(rawOptions?: ResolveConfig): Promise<Context
     return {
       commend: {
         uploadBefore: options.defaultBuild ? [`${getPackageManager()} run build`] : [],
-        deployBefore: [`echo "${deployCommandEndSymbol}"\n`],
-        deployAfter: [`echo "${deployCommandEndSymbol}"\n`],
       },
       target: options.target || `~\\${options.uploadPath}`,
     };

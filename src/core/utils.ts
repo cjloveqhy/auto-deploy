@@ -127,39 +127,77 @@ async function shellExecRemoteWithLiveOutput(conn, commands: string[] = []): Pro
 
   function sendNextCommand(stream) {
     if (currentCommandIndex < commands.length) {
-      const cmd = commands[currentCommandIndex] + '\n';
+      const cmd = commands[currentCommandIndex] + ` && echo ${deployCommandEndSymbol} || echo ${deployCommandEndSymbol}\n`;
       stream.write(cmd);
       currentCommandIndex++;
     }
   }
   process.stdout.write('\n');
+  let lastRecord: string;
+  const interval = setInterval(() => {
+    if (currentCommandIndex === 0 || lastRecord && lastRecord.trim().includes(deployCommandEndSymbol)) {
+      lastRecord = null;
+      sendNextCommand(stream);
+    }
+  }, 10);
+
+  function closeInterval(): void {
+    if (interval) {
+      clearInterval(interval);
+    }
+  }
+
   await new Promise<void>((resolve, reject) => {
-    stream.on('data', (data) => {
-      const result = data.toString();
-      if (['error', 'command not found'].includes(result)) {
-        process.stderr.write(data);
-        reject();
-      } else {
-        if ((currentCommandIndex > 1 && currentCommandIndex <= commands.length)) {
-          if (!result.includes(deployCommandEndSymbol)) {
-            process.stdout.write(data);
-          }
-        }
-        sendNextCommand(stream);
-        if (currentCommandIndex === commands.length && result.includes(deployCommandEndSymbol)) {
-          resolve();
+    let result: string;
+    const errMatch = ['Try', '--help', 'error', 'command not found'];
+    const endStr = ` && echo ${deployCommandEndSymbol} || echo ${deployCommandEndSymbol}\r\n`;
+
+    function isError(result: string): boolean {
+      for (const match of errMatch) {
+        if (result.includes(match)) {
+          return true;
         }
       }
-    });
+      return false;
+    }
 
-    sendNextCommand(stream);
+    stream.on('data', (data) => {
+      result = data.toString();
+      result = result.replace(/ \r(?!\n)/g, '');
+      lastRecord = result;
+      if (currentCommandIndex > 0 && result.includes(commands[currentCommandIndex - 1]) && result.includes(deployCommandEndSymbol)) {
+        const symbolIndex = result.indexOf(endStr);
+        const cmd = result.substring(0, symbolIndex);
+        result = result.replace(endStr, '').replace(deployCommandEndSymbol, '');
+        const last_enter = result.lastIndexOf('\r\n');
+        if (last_enter >= 0) {
+          result = `\x1B[2K\r> ${cmd}\r\n` + result.substring(cmd.length, last_enter);
+        } else {
+          result = `\x1B[2K\r> ${cmd}\r\n`;
+        }
+      }
+      if (isError(result)) {
+          closeInterval();
+          result += '\r\n';
+          reject();
+        }
+      if ((currentCommandIndex >= 1 && currentCommandIndex <= commands.length)) {
+        if (!result.includes(deployCommandEndSymbol)) {
+          process.stdout.write(result);
+        }
+      }
+      if (currentCommandIndex === commands.length && !lastRecord.includes(commands[commands.length - 1]) && lastRecord.includes(deployCommandEndSymbol)) {
+        closeInterval();
+        resolve();
+      }
+    });
   });
   process.stdout.write('\n');
 }
 
 // 执行部署阶段的命令
 export async function remoteExecCommands(conn, commands: string[] = [], shell: boolean): Promise<void> {
-  if (commands.length === 1 && commands[0].includes(deployCommandEndSymbol)) {
+  if (!commands.length) {
     return Promise.resolve();
   }
   if (shell) {
