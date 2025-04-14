@@ -7,19 +7,19 @@ export interface Commands {
    */
   shell?: boolean
   /**
-   * 文件上传前执行脚本
+   * Execute the script before uploading the file.
    */
   uploadBefore?: string[]
   /**
-   * 文件上传后执行脚本
+   * Execute the script after uploading the file.
    */
   uploadAfter?: string[]
   /**
-   * 部署前执行脚本
+   * Execute the script before deployment.
    */
   deployBefore?: string[]
   /**
-   * 部署后执行脚本
+   * Execute the script after deployment.
    */
   deployAfter?: string[]
 }
@@ -35,12 +35,12 @@ export interface BastionHostBase {
    */
   listen?: {
     /**
-     * bastion host local listen ip address
+     * bastion host local listen ip address.
      * @defaultValue 127.0.0.1
      */
     ip?: string
     /**
-     * bastion host local listen port
+     * bastion host local listen port.
      * @defaultValue 12345
      */
     port?: number
